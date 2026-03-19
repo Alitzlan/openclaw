@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHAIN="${OPENCLAW_FIREWALL_CHAIN:-DOCKER-USER}"
+HOST_INPUT_CHAIN="${OPENCLAW_FIREWALL_HOST_INPUT_CHAIN:-INPUT}"
 NETWORK_NAME="${OPENCLAW_NETWORK_NAME:-openclaw_default}"
 CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-openclaw-openclaw-gateway-1}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
@@ -59,6 +60,19 @@ if ! iptables -nL "$CHAIN" >/dev/null 2>&1; then
 fi
 
 "$SCRIPT_DIR/remove.sh"
+
+# Block container-initiated connections to the Docker host itself. This traffic
+# is locally delivered and bypasses the DOCKER-USER/FORWARD path entirely.
+iptables -I "$HOST_INPUT_CHAIN" 1 \
+  -s "$SRC_SUBNET" \
+  -j REJECT --reject-with icmp-port-unreachable \
+  -m comment --comment "$COMMENT_PREFIX deny-host-input"
+
+iptables -I "$HOST_INPUT_CHAIN" 1 \
+  -s "$SRC_SUBNET" \
+  -m conntrack --ctstate RELATED,ESTABLISHED \
+  -j ACCEPT \
+  -m comment --comment "$COMMENT_PREFIX host-established"
 
 # Insert in reverse order because each rule is added at the top of the chain.
 iptables -I "$CHAIN" 1 \
