@@ -8,6 +8,31 @@ CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-openclaw-openclaw-gateway-1}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
 BRIDGE_PORT="${OPENCLAW_BRIDGE_PORT:-18790}"
 COMMENT_PREFIX="${OPENCLAW_FIREWALL_COMMENT_PREFIX:-openclaw-guard}"
+BRIDGE_NF_IPTABLES_PATH="/proc/sys/net/bridge/bridge-nf-call-iptables"
+
+fail() {
+  echo "OpenClaw firewall apply failed: $*" >&2
+  exit 1
+}
+
+require_bridge_netfilter() {
+  if [[ ! -r "$BRIDGE_NF_IPTABLES_PATH" ]]; then
+    fail \
+      "bridge netfilter is unavailable ($BRIDGE_NF_IPTABLES_PATH missing). " \
+      "Load br_netfilter and enable net.bridge.bridge-nf-call-iptables=1 before applying rules."
+  fi
+
+  local bridge_nf_iptables
+  bridge_nf_iptables="$(<"$BRIDGE_NF_IPTABLES_PATH")"
+  if [[ "$bridge_nf_iptables" != "1" ]]; then
+    fail \
+      "net.bridge.bridge-nf-call-iptables=$bridge_nf_iptables. " \
+      "Docker bridge traffic will bypass the DOCKER-USER chain. " \
+      "Set net.bridge.bridge-nf-call-iptables=1 and re-run this script."
+  fi
+}
+
+require_bridge_netfilter
 
 docker inspect "$CONTAINER_NAME" >/dev/null 2>&1
 docker network inspect "$NETWORK_NAME" >/dev/null 2>&1
@@ -26,8 +51,7 @@ CONTAINER_IP="$(
 )"
 
 if [[ -z "$SRC_SUBNET" || -z "$BRIDGE_GATEWAY_IP" || -z "$CONTAINER_IP" ]]; then
-  echo "Failed to resolve OpenClaw Docker network details." >&2
-  exit 1
+  fail "Failed to resolve OpenClaw Docker network details."
 fi
 
 if ! iptables -nL "$CHAIN" >/dev/null 2>&1; then
